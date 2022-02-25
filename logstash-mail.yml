@@ -1,0 +1,154 @@
+input {
+    imap {
+        host => ""
+        user => ""
+        password => ""
+        port => 993
+        content_type => "text/plain"
+        sincedb_path => "/opt/sdb"
+        uid_tracking => true
+        check_interval => 300
+        delete => false
+        strip_attachments => true
+        folder => "Inbox"
+    }
+}
+
+filter {
+      prune {
+        whitelist_names => [ "subject", "from", "to", "timestamp", "message" ]
+      }
+
+      prune {
+        blacklist_names => [ "arc-message-signature", "x-eoptenantattributedmessage", "x-eopattributedmessage", "x-(.*)", "message-id" ]
+      }
+
+
+      grok {
+        match => {
+            "subject" => "(?<state>(?<=^\[)\w+(?=\]\[))"
+        }
+      }
+
+      if "_grokparsefailure" in [tags] {
+        mutate {
+            add_field => {
+                "state" => "unknown"
+            }
+        }
+      }
+
+      if [state] not in [ "FAIL", "CRIT", "DOWN", "WARN", "OK", "UP", "ACK"] {
+        mutate {
+            replace => [ "state", "unknown" ]
+        }
+      }
+
+      if ([state] == "FAIL" ) or ([state] == "CRIT" ) or ([state] == "DOWN" ) {
+        mutate {
+            replace => [ "state", "critical" ]
+        }
+      }
+
+      if [state] == "WARN" {
+        mutate {
+            replace => [ "state", "warning" ]
+        }
+      }
+
+      if [state] == "OK" or ([state] == "UP" ) {
+        mutate {
+            replace => [ "state", "ok" ]
+        }
+      }
+
+      if [state] == "ACK" {
+        mutate {
+            replace => [ "state", "acknowledged" ]
+        }
+      }
+
+
+      mutate {
+        add_field => {
+            "sender_blacklist" => [ "", "", "", "", "", "" ]
+        }
+      }
+
+      if [from] in [sender_blacklist] {
+        drop { }
+      }
+
+      if "" in [from] {
+        drop { }
+      }
+
+      if "" in [from] {
+        drop { }
+      }
+
+
+      #if [from] != "" {
+      #  drop { }
+      #}
+
+      if ("xxx" in [message]) or ("xxx" in [message]) {
+        drop { }
+      }
+
+
+
+      #mutate {
+      #  gsub => [ "message", "\n", "" ]
+      #}
+
+      #mutate {
+      #  gsub => [ "message", "\t", "" ]
+      #}
+
+      #mutate {
+      #  gsub => [ "message", "<.*?>", "" ]
+      #}
+
+      mutate {
+        gsub => [ "subject", "\"", "" ]
+      }
+
+      mutate {
+        replace => [ "message", "Body Content Parse Ignore"]
+      }
+}
+
+output {
+    stdout {
+      codec => rubydebug
+    }
+
+    #elasticsearch {
+    #   index => "emails"
+    #   document_type => "_doc"
+    #   hosts => "localhost:9200"
+    #}
+
+    http {
+        http_method => "post"
+        url => "https://api.xxxxxxxx.io/data/v2/alerts"
+        format => "message"
+        headers => ["Authorization", "Bearer xxxxxxxxxxxxxxxxx"]
+        content_type => "application/json"
+        #message => '{"app_key":"xxxxxxxxxxxxxxxxx","service":"%{subject}","status":"%{state}","check":"send from %{from}","description":"%{message}"}'
+        message => '{
+            "app_key":"xxxxxxxxxxxxxxxxx",
+            "alerts": [{
+                "service":"%{subject}",
+                "status":"%{state}",
+                "from":"%{from}",
+                "to":"%{to}",
+                "description":"%{message}",
+                "receive_at":"%{@timestamp}"
+            }]
+        }'
+    }
+}
+
+
